@@ -4,13 +4,12 @@
 package akka.event
 
 import language.implicitConversions
+
 import akka.actor.{ ActorRef, ActorSystem }
 import akka.event.Logging.simpleName
 import akka.util.Subclassification
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
-import akka.actor.Props
-import scala.concurrent.Future
 
 object EventStream {
   @deprecated("Use explicit `system.eventStream` instead", "2.4")
@@ -26,12 +25,12 @@ object EventStream {
  * The debug flag in the constructor toggles if operations on this EventStream should also be published
  * as Debug-Events
  */
-class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) extends LoggingBus with SubchannelClassification {
+class EventStream(sys: ActorSystem, private val debug: Boolean) extends LoggingBus with SubchannelClassification {
 
-  def this(sys: (Props, String) ⇒ Unit) = this(sys, debug = false)
+  def this(sys: ActorSystem) = this(sys, debug = false)
 
   @deprecated("Use constructor with ActorSystem parameter", "2.4")
-  def this(debug: Boolean = false) = this(systemActorOf = null, debug)
+  def this(debug: Boolean = false) = this(sys = null, debug)
 
   type Event = AnyRef
   type Classifier = Class[_]
@@ -47,7 +46,7 @@ class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) e
   protected def classify(event: AnyRef): Class[_] = event.getClass
 
   protected def publish(event: AnyRef, subscriber: ActorRef) = {
-    if (systemActorOf == null && subscriber.isTerminated) unsubscribe(subscriber)
+    if (sys == null && subscriber.isTerminated) unsubscribe(subscriber)
     else subscriber ! event
   }
 
@@ -79,7 +78,7 @@ class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) e
    */
   def startUnsubscriber(): Unit =
     // sys may be null for backwards compatibility reasons
-    if (systemActorOf ne null) EventStreamUnsubscriber.start(systemActorOf, this)
+    if (sys ne null) EventStreamUnsubscriber.start(sys, this)
 
   /**
    * INTERNAL API
@@ -87,7 +86,7 @@ class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) e
   @tailrec
   final private[akka] def initUnsubscriber(unsubscriber: ActorRef): Boolean = {
     // sys may be null for backwards compatibility reasons
-    if (systemActorOf eq null) false
+    if (sys eq null) false
     else initiallySubscribedOrUnsubscriber.get match {
       case value @ Left(subscribers) ⇒
         if (initiallySubscribedOrUnsubscriber.compareAndSet(value, Right(unsubscriber))) {
@@ -112,7 +111,7 @@ class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) e
   @tailrec
   private def registerWithUnsubscriber(subscriber: ActorRef): Unit = {
     // sys may be null for backwards compatibility reasons
-    if (systemActorOf ne null) initiallySubscribedOrUnsubscriber.get match {
+    if (sys ne null) initiallySubscribedOrUnsubscriber.get match {
       case value @ Left(subscribers) ⇒
         if (!initiallySubscribedOrUnsubscriber.compareAndSet(value, Left(subscribers + subscriber)))
           registerWithUnsubscriber(subscriber)
@@ -132,7 +131,7 @@ class EventStream(systemActorOf: (Props, String) ⇒ Unit, val debug: Boolean) e
   @tailrec
   private def unregisterIfNoMoreSubscribedChannels(subscriber: ActorRef): Unit = {
     // sys may be null for backwards compatibility reasons
-    if (systemActorOf ne null) initiallySubscribedOrUnsubscriber.get match {
+    if (sys ne null) initiallySubscribedOrUnsubscriber.get match {
       case value @ Left(subscribers) ⇒
         if (!initiallySubscribedOrUnsubscriber.compareAndSet(value, Left(subscribers - subscriber)))
           unregisterIfNoMoreSubscribedChannels(subscriber)

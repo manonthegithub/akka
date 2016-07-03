@@ -523,11 +523,11 @@ abstract class ExtendedActorSystem extends ActorSystem {
 }
 
 private[akka] class ActorSystemImpl(
-    val name: String,
-    applicationConfig: Config,
-    classLoader: ClassLoader,
-    defaultExecutionContext: Option[ExecutionContext],
-    val guardianProps: Option[Props]) extends ExtendedActorSystem {
+  val name: String,
+  applicationConfig: Config,
+  classLoader: ClassLoader,
+  defaultExecutionContext: Option[ExecutionContext],
+  val guardianProps: Option[Props]) extends ExtendedActorSystem {
 
   if (!name.matches("""^[a-zA-Z0-9][a-zA-Z0-9-_]*$"""))
     throw new IllegalArgumentException(
@@ -607,7 +607,7 @@ private[akka] class ActorSystemImpl(
   import settings._
 
   // this provides basic logging (to stdout) until .start() is called below
-  val eventStream = new EventStream((p, n) => systemActorOf(p, n), DebugEventStream)
+  val eventStream = new EventStream(this, DebugEventStream)
   eventStream.startStdoutLogger(settings)
 
   val logFilter: LoggingFilter = {
