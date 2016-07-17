@@ -42,7 +42,6 @@ object StepWise {
   private final case class ThunkV(f: Any ⇒ Any) extends AST
   private final case class Message(timeout: FiniteDuration, f: (Any, Any) ⇒ Any, trace: Trace) extends AST
   private final case class MultiMessage(timeout: FiniteDuration, count: Int, f: (Seq[Any], Any) ⇒ Any, trace: Trace) extends AST
-  private final case class Failure(timeout: FiniteDuration, f: (Failed, Any) ⇒ (Failed.Decision, Any), trace: Trace) extends AST
   private final case class Termination(timeout: FiniteDuration, f: (Terminated, Any) ⇒ Any, trace: Trace) extends AST
 
   private sealed trait Trace {
@@ -78,9 +77,6 @@ object StepWise {
     def expectMultipleMessages[V](timeout: FiniteDuration, count: Int)(f: (Seq[T], U) ⇒ V): Steps[T, V] =
       copy(ops = MultiMessage(timeout, count, f.asInstanceOf[(Seq[Any], Any) ⇒ Any], getTrace()) :: ops)
 
-    def expectFailure[V](timeout: FiniteDuration)(f: (Failed, U) ⇒ (Failed.Decision, V)): Steps[T, V] =
-      copy(ops = Failure(timeout, f.asInstanceOf[(Failed, Any) ⇒ (Failed.Decision, Any)], getTrace()) :: ops)
-
     def expectTermination[V](timeout: FiniteDuration)(f: (Terminated, U) ⇒ V): Steps[T, V] =
       copy(ops = Termination(timeout, f.asInstanceOf[(Terminated, Any) ⇒ Any], getTrace()) :: ops)
 
@@ -89,9 +85,6 @@ object StepWise {
 
     def expectMultipleMessagesKeep(timeout: FiniteDuration, count: Int)(f: (Seq[T], U) ⇒ Unit): Steps[T, U] =
       copy(ops = MultiMessage(timeout, count, (msgs, value) ⇒ { f.asInstanceOf[(Seq[Any], Any) ⇒ Any](msgs, value); value }, getTrace()) :: ops)
-
-    def expectFailureKeep(timeout: FiniteDuration)(f: (Failed, U) ⇒ Failed.Decision): Steps[T, U] =
-      copy(ops = Failure(timeout, (failed, value) ⇒ f.asInstanceOf[(Failed, Any) ⇒ Failed.Decision](failed, value) -> value, getTrace()) :: ops)
 
     def expectTerminationKeep(timeout: FiniteDuration)(f: (Terminated, U) ⇒ Unit): Steps[T, U] =
       copy(ops = Termination(timeout, (t, value) ⇒ { f.asInstanceOf[(Terminated, Any) ⇒ Any](t, value); value }, getTrace()) :: ops)
@@ -151,16 +144,6 @@ object StepWise {
           }
         }
         behavior(0, Nil)
-      case Failure(t, f, trace) :: tail ⇒
-        ctx.setReceiveTimeout(t)
-        Full {
-          case Sig(_, ReceiveTimeout) ⇒ throwTimeout(trace, s"timeout of $t expired while waiting for a failure")
-          case Sig(_, failure: Failed) ⇒
-            val (response, v) = f(failure, value)
-            failure.decide(response)
-            run(ctx, tail, v)
-          case other ⇒ throwIllegalState(trace, s"unexpected $other while waiting for a message")
-        }
       case Termination(t, f, trace) :: tail ⇒
         ctx.setReceiveTimeout(t)
         Full {

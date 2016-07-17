@@ -26,13 +26,12 @@ private[typed] trait DeathWatch[T] {
   protected def system: ActorSystemImpl[Nothing]
   protected def self: ActorRefImpl[T]
   protected def parent: ActorRefImpl[Nothing]
-  protected def isTerminating: Boolean
   protected def behavior: Behavior[T]
   protected def next(b: Behavior[T], msg: Any): Unit
   protected def childrenMap: Map[String, ActorRefImpl[Nothing]]
   protected def terminatingMap: Map[String, ActorRefImpl[Nothing]]
   protected def ctx: ActorContext[T]
-  protected def failed: Throwable
+  protected def maySend: Boolean
   protected def publish(e: Logging.LogEvent): Unit
   protected def clazz(obj: AnyRef): Class[_]
 
@@ -67,17 +66,24 @@ private[typed] trait DeathWatch[T] {
    * When this actor is watching the subject of [[akka.actor.Terminated]] message
    * it will be propagated to user's receive.
    */
-  protected def watchedActorTerminated(actor: ARImpl, existenceConfirmed: Boolean, addressTerminated: Boolean): Unit = {
+  protected def watchedActorTerminated(actor: ARImpl, failure: Throwable): Boolean = {
     if (watching.contains(actor)) {
       maintainAddressTerminatedSubscription(actor) {
         watching -= actor
       }
-      if (!isTerminating) {
-        val t = Terminated(actor)
+      if (maySend) {
+        val t = Terminated(actor)(failure)
         next(behavior.management(ctx, t), t)
       }
     }
-    //if (childrenRefs.getByRef(actor).isDefined) handleChildTerminated(actor)
+    childrenMap.get(actor.path.name) match {
+      case Some(`actor`) ⇒ handleChildTerminated(actor)
+      case _             ⇒ true
+    }
+  }
+
+  private def handleChildTerminated(actor: ARImpl): Boolean = {
+    ???
   }
 
   protected def tellWatchersWeDied(): Unit =
@@ -85,7 +91,7 @@ private[typed] trait DeathWatch[T] {
       try {
         // Don't need to send to parent parent since it receives a DWN by default
         def sendTerminated(ifLocal: Boolean)(watcher: ARImpl): Unit =
-          if (watcher.isLocal == ifLocal && watcher != parent) watcher.sendSystem(DeathWatchNotification(self, failed))
+          if (watcher.isLocal == ifLocal && watcher != parent) watcher.sendSystem(DeathWatchNotification(self, null))
 
         /*
          * It is important to notify the remote watchers first, otherwise RemoteDaemon might shut down, causing

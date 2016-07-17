@@ -16,7 +16,7 @@ import language.implicitConversions
  * [[akka.event.EventStream]] on a best effort basis
  * (i.e. this delivery is not reliable).
  */
-abstract class ActorRef[-T](_path: ActorPath) extends java.lang.Comparable[ActorRef[Any]] { this: ScalaActorRef[T] with internal.ActorRefImpl[T] ⇒
+abstract class ActorRef[-T](_path: ActorPath) extends java.lang.Comparable[ActorRef[Nothing]] { this: ScalaActorRef[T] with internal.ActorRefImpl[T] ⇒
   /**
    * Send a message to the Actor referenced by this ActorRef using *at-most-once*
    * messaging semantics.
@@ -41,7 +41,7 @@ abstract class ActorRef[-T](_path: ActorPath) extends java.lang.Comparable[Actor
   /**
    * Comparison takes path and the unique id of the actor cell into account.
    */
-  final def compareTo(other: ActorRef[Any]) = {
+  final def compareTo(other: ActorRef[Nothing]) = {
     val x = this.path compareTo other.path
     if (x == 0) if (this.path.uid < other.path.uid) -1 else if (this.path.uid == other.path.uid) 0 else 1
     else x

@@ -73,10 +73,6 @@ object ActorContextSpec {
     FullTotal {
       case Sig(ctx, signal) ⇒
         monitor ! GotSignal(signal)
-        signal match {
-          case f: Failed ⇒ f.decide(Failed.Restart)
-          case _         ⇒
-        }
         Same
       case Msg(ctx, message) ⇒ message match {
         case Ping(replyTo) ⇒
@@ -250,21 +246,22 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
       val self = ctx.self
       val ex = new Exception("KABOOM1")
       startWith { subj ⇒
-        val log = muteExpectedException[Exception]("KABOOM1", occurrences = 1)
-        subj ! Throw(ex)
-        (subj, log)
-      }.expectFailureKeep(expectTimeout) {
-        case (f, (subj, _)) ⇒
-          f.cause should ===(ex)
-          f.child should ===(subj)
-          Failed.Restart
-      }.expectMessage(expectTimeout) {
-        case (msg, (subj, log)) ⇒
-          msg should ===(GotSignal(PreRestart))
-          log.assertDone(expectTimeout)
-          subj
-      }.expectMessage(expectTimeout) { (msg, subj) ⇒
-        msg should ===(GotSignal(PostRestart))
+        // FIXME implement ScalaDSL.Restarter
+        //        val log = muteExpectedException[Exception]("KABOOM1", occurrences = 1)
+        //        subj ! Throw(ex)
+        //        (subj, log)
+        //      }.expectFailureKeep(expectTimeout) {
+        //        case (f, (subj, _)) ⇒
+        //          f.cause should ===(ex)
+        //          f.child should ===(subj)
+        //          Failed.Restart
+        //      }.expectMessage(expectTimeout) {
+        //        case (msg, (subj, log)) ⇒
+        //          msg should ===(GotSignal(PreRestart))
+        //          log.assertDone(expectTimeout)
+        //          subj
+        //      }.expectMessage(expectTimeout) { (msg, subj) ⇒
+        //        msg should ===(GotSignal(PostRestart))
         ctx.stop(subj)
       }.expectMessage(expectTimeout) { (msg, _) ⇒
         msg should ===(GotSignal(PostStop))
@@ -285,16 +282,17 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
       val ex = new Exception("KABOOM2")
       startWith.mkChild(None, ctx.spawnAdapter(ChildEvent), self) {
         case (subj, child) ⇒
-          val log = muteExpectedException[Exception]("KABOOM2", occurrences = 1)
-          child ! Throw(ex)
-          (subj, child, log)
-      }.expectMultipleMessages(expectTimeout, 3) {
-        case (msgs, (subj, child, log)) ⇒
-          msgs should ===(
-            GotSignal(Failed(`ex`, `child`)) ::
-              ChildEvent(GotSignal(PreRestart)) ::
-              ChildEvent(GotSignal(PostRestart)) :: Nil)
-          log.assertDone(expectTimeout)
+          // FIXME
+          //          val log = muteExpectedException[Exception]("KABOOM2", occurrences = 1)
+          //          child ! Throw(ex)
+          //          (subj, child, log)
+          //      }.expectMultipleMessages(expectTimeout, 3) {
+          //        case (msgs, (subj, child, log)) ⇒
+          //          msgs should ===(
+          //            GotSignal(Failed(`ex`, `child`)) ::
+          //              ChildEvent(GotSignal(PreRestart)) ::
+          //              ChildEvent(GotSignal(PostRestart)) :: Nil)
+          //          log.assertDone(expectTimeout)
           child ! BecomeInert(self) // necessary to avoid PostStop/Terminated interference
           (subj, child)
       }.expectMessageKeep(expectTimeout) {
@@ -332,36 +330,40 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
       val ex = new Exception("KABOOM05")
       startWith
         .stimulate(_ ! BecomeInert(self), _ ⇒ BecameInert)
-        .stimulate(_ ! Ping(self), _ ⇒ Pong2) { subj ⇒
-          val log = muteExpectedException[Exception]("KABOOM05")
-          subj ! Throw(ex)
-          (subj, log)
-        }.expectFailureKeep(expectTimeout) {
-          case (f, (subj, log)) ⇒
-            f.child should ===(subj)
-            f.cause should ===(ex)
-            Failed.Restart
-        }.expectMessage(expectTimeout) {
-          case (msg, (subj, log)) ⇒
-            msg should ===(GotSignal(PostRestart))
-            log.assertDone(expectTimeout)
-            subj
-        }.stimulate(_ ! Ping(self), _ ⇒ Pong1)
+        .stimulate(_ ! Ping(self), _ ⇒ Pong2)
+        // FIXME
+        //        { subj ⇒
+        //          val log = muteExpectedException[Exception]("KABOOM05")
+        //          subj ! Throw(ex)
+        //          (subj, log)
+        //        }.expectFailureKeep(expectTimeout) {
+        //          case (f, (subj, log)) ⇒
+        //            f.child should ===(subj)
+        //            f.cause should ===(ex)
+        //            Failed.Restart
+        //        }.expectMessage(expectTimeout) {
+        //          case (msg, (subj, log)) ⇒
+        //            msg should ===(GotSignal(PostRestart))
+        //            log.assertDone(expectTimeout)
+        //            subj
+        //        }
+        .stimulate(_ ! Ping(self), _ ⇒ Pong1)
     })
 
-    def `06 must not reset behavior upon Resume`(): Unit = sync(setup("ctx06") { (ctx, startWith) ⇒
-      val self = ctx.self
-      val ex = new Exception("KABOOM05")
-      startWith
-        .stimulate(_ ! BecomeInert(self), _ ⇒ BecameInert)
-        .stimulate(_ ! Ping(self), _ ⇒ Pong2).keep { subj ⇒
-          subj ! Throw(ex)
-        }.expectFailureKeep(expectTimeout) { (f, subj) ⇒
-          f.child should ===(subj)
-          f.cause should ===(ex)
-          Failed.Resume
-        }.stimulate(_ ! Ping(self), _ ⇒ Pong2)
-    })
+    // FIXME
+    //    def `06 must not reset behavior upon Resume`(): Unit = sync(setup("ctx06") { (ctx, startWith) ⇒
+    //      val self = ctx.self
+    //      val ex = new Exception("KABOOM05")
+    //      startWith
+    //        .stimulate(_ ! BecomeInert(self), _ ⇒ BecameInert)
+    //        .stimulate(_ ! Ping(self), _ ⇒ Pong2).keep { subj ⇒
+    //          subj ! Throw(ex)
+    //        }.expectFailureKeep(expectTimeout) { (f, subj) ⇒
+    //          f.child should ===(subj)
+    //          f.cause should ===(ex)
+    //          Failed.Resume
+    //        }.stimulate(_ ! Ping(self), _ ⇒ Pong2)
+    //    })
 
     def `07 must stop upon Stop`(): Unit = sync(setup("ctx07") { (ctx, startWith) ⇒
       val self = ctx.self
@@ -370,10 +372,6 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
         .stimulate(_ ! Ping(self), _ ⇒ Pong1).keep { subj ⇒
           subj ! Throw(ex)
           ctx.watch(subj)
-        }.expectFailureKeep(expectTimeout) { (f, subj) ⇒
-          f.child should ===(subj)
-          f.cause should ===(ex)
-          Failed.Stop
         }.expectMessageKeep(expectTimeout) { (msg, _) ⇒
           msg should ===(GotSignal(PostStop))
         }.expectTermination(expectTimeout) { (t, subj) ⇒
@@ -405,7 +403,7 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
         msg should ===(Watched)
         child ! Stop
       }.expectMessage(expectTimeout) { (msg, child) ⇒
-        msg should ===(GotSignal(Terminated(child)))
+        msg should ===(GotSignal(Terminated(child)(null)))
       }
     })
 
@@ -417,11 +415,11 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
           child ! Stop
       }.expectTermination(expectTimeout) {
         case (t, (subj, child)) ⇒
-          t should ===(Terminated(child))
+          t should ===(Terminated(child)(null))
           subj ! Watch(child, blackhole)
           child
       }.expectMessage(expectTimeout) { (msg, child) ⇒
-        msg should ===(GotSignal(Terminated(child)))
+        msg should ===(GotSignal(Terminated(child)(null)))
       }
     })
 
@@ -441,7 +439,7 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
           child ! Stop
           child
       }.expectTermination(expectTimeout) { (t, child) ⇒
-        t should ===(Terminated(child))
+        t should ===(Terminated(child)(null))
       }
     })
 
@@ -458,10 +456,6 @@ class ActorContextSpec extends TypedSpec(ConfigFactory.parseString(
         case (msg, (subj, child)) ⇒
           msg should ===(BecameCareless)
           child ! Stop
-      }.expectFailureKeep(expectTimeout) {
-        case (f, (subj, child)) ⇒
-          f.child should ===(subj)
-          Failed.Stop
       }.expectMessage(expectTimeout) {
         case (msg, (subj, child)) ⇒
           msg should ===(GotSignal(PostStop))

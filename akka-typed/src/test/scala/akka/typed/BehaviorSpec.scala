@@ -126,28 +126,6 @@ class BehaviorSpec extends TypedSpec {
       mkCtx().check(PostRestart).check(GetSelf)
     }
 
-    def `must react to Failed`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx()
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-    }
-
-    def `must react to Failed after a message`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx().check(GetSelf)
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-    }
-
-    def `must react to a message after Failed`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx()
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-      setup.check(GetSelf)
-    }
-
     def `must react to ReceiveTimeout`(): Unit = {
       mkCtx().check(ReceiveTimeout)
     }
@@ -161,15 +139,15 @@ class BehaviorSpec extends TypedSpec {
     }
 
     def `must react to Terminated`(): Unit = {
-      mkCtx().check(Terminated(Inbox.sync("x").ref))
+      mkCtx().check(Terminated(Inbox.sync("x").ref)(null))
     }
 
     def `must react to Terminated after a message`(): Unit = {
-      mkCtx().check(GetSelf).check(Terminated(Inbox.sync("x").ref))
+      mkCtx().check(GetSelf).check(Terminated(Inbox.sync("x").ref)(null))
     }
 
     def `must react to a message after Terminated`(): Unit = {
-      mkCtx().check(Terminated(Inbox.sync("x").ref)).check(GetSelf)
+      mkCtx().check(Terminated(Inbox.sync("x").ref)(null)).check(GetSelf)
     }
   }
 
@@ -240,28 +218,6 @@ class BehaviorSpec extends TypedSpec {
       mkCtx().check(PostRestart).check(Swap).check(GetSelf)
     }
 
-    def `must react to Failed after swap`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx().check(Swap)
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-    }
-
-    def `must react to Failed after a message after swap`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx().check(Swap).check(GetSelf)
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-    }
-
-    def `must react to a message after Failed after swap`(): Unit = {
-      val setup @ Setup(ctx, inbox) = mkCtx().check(Swap)
-      val f = Failed(ex, inbox.ref)
-      setup.check(f)
-      f.getDecision should ===(Failed.Restart)
-      setup.check(GetSelf)
-    }
-
     def `must react to ReceiveTimeout after swap`(): Unit = {
       mkCtx().check(Swap).check(ReceiveTimeout)
     }
@@ -275,15 +231,15 @@ class BehaviorSpec extends TypedSpec {
     }
 
     def `must react to Terminated after swap`(): Unit = {
-      mkCtx().check(Swap).check(Terminated(Inbox.sync("x").ref))
+      mkCtx().check(Swap).check(Terminated(Inbox.sync("x").ref)(null))
     }
 
     def `must react to Terminated after a message after swap`(): Unit = {
-      mkCtx().check(Swap).check(GetSelf).check(Terminated(Inbox.sync("x").ref))
+      mkCtx().check(Swap).check(GetSelf).check(Terminated(Inbox.sync("x").ref)(null))
     }
 
     def `must react to a message after Terminated after swap`(): Unit = {
-      mkCtx().check(Swap).check(Terminated(Inbox.sync("x").ref)).check(GetSelf)
+      mkCtx().check(Swap).check(Terminated(Inbox.sync("x").ref)(null)).check(GetSelf)
     }
   }
 
@@ -292,10 +248,6 @@ class BehaviorSpec extends TypedSpec {
     Full {
       case Sig(ctx, signal) ⇒
         monitor ! GotSignal(signal)
-        signal match {
-          case f: Failed ⇒ f.decide(Failed.Restart)
-          case _         ⇒
-        }
         Same
       case Msg(ctx, GetSelf) ⇒
         monitor ! Self(ctx.self)
@@ -330,10 +282,6 @@ class BehaviorSpec extends TypedSpec {
       FullTotal {
         case Sig(ctx, signal) ⇒
           monitor ! GotSignal(signal)
-          signal match {
-            case f: Failed ⇒ f.decide(Failed.Restart)
-            case _         ⇒
-          }
           Same
         case Msg(ctx, GetSelf) ⇒
           monitor ! Self(ctx.self)

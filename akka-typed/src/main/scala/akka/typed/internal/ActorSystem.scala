@@ -13,6 +13,19 @@ import scala.util.control.NonFatal
 import scala.util.control.ControlThrowable
 import scala.collection.immutable
 import akka.typed.Dispatchers
+import scala.concurrent.Promise
+import java.util.concurrent.ConcurrentSkipListSet
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.collection.JavaConverters._
+import scala.util.Success
+import akka.util.Timeout
+import java.io.Closeable
+
+object ActorSystemImpl {
+  sealed trait SystemCommand
+  case class CreateSystemActor[T](props: Props[T])(replyTo: ActorRef[ActorRef[T]]) extends SystemCommand
+  val systemGuardianBehavior: Behavior[SystemCommand] = ???
+}
 
 /*
  * Actor Ideas:
@@ -56,6 +69,8 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
                                          _ec: Option[ExecutionContext],
                                          _p: Props[T])
   extends ActorRef[T](a.RootActorPath(a.Address("akka", name)) / "user") with ActorSystem[T] with ScalaActorRef[T] with ActorRefImpl[T] {
+
+  import ActorSystemImpl._
 
   if (!name.matches("""^[a-zA-Z0-9][a-zA-Z0-9-_]*$"""))
     throw new IllegalArgumentException(
@@ -101,7 +116,9 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
   override val dynamicAccess: a.DynamicAccess = new a.ReflectiveDynamicAccess(_cl)
 
   // this provides basic logging (to stdout) until .start() is called below
-  override val eventStream = new e.EventStream((p, n) ⇒ systemActorOf(p, n), settings.DebugEventStream)
+  // FIXME!!!
+  private val untypedSystem = a.ActorSystem(name + "-untyped")
+  override def eventStream = untypedSystem.eventStream
   eventStream.startStdoutLogger(settings)
 
   override val logFilter: e.LoggingFilter = {
@@ -127,6 +144,10 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
       classOf[ThreadFactory] -> threadFactory.withName(threadFactory.name + "-scheduler"))).get
 
   override val scheduler: a.Scheduler = createScheduler()
+  private def closeScheduler(): Unit = scheduler match {
+    case x: Closeable ⇒ x.close()
+    case _            ⇒
+  }
 
   override val dispatchers: Dispatchers = new Dispatchers(settings, log)
   override val executionContext: ExecutionContextExecutor = dispatchers.lookup(DispatcherDefault)
@@ -134,16 +155,66 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
   override val startTime: Long = System.currentTimeMillis()
   override def uptime: Long = System.currentTimeMillis() - startTime
 
-  override def terminate(): Future[Terminated] = ???
-  override def whenTerminated: Future[Terminated] = ???
+  private val terminationPromise: Promise[Terminated] = Promise()
 
-  override def deadLetters[U]: ActorRefImpl[U] = ???
+  private val rootPath: a.ActorPath = a.RootActorPath(a.Address("typed", name))
 
-  override def tell(msg: T): Unit = ???
+  private val topLevelActors = new ConcurrentSkipListSet[ActorRefImpl[Nothing]]
+  private val terminateTriggered = new AtomicBoolean
+  private val theOneWhoWalksTheBubblesOfSpaceTime: ActorRefImpl[Nothing] =
+    new ActorRef[Nothing](rootPath) with ScalaActorRef[Nothing] with ActorRefImpl[Nothing] {
+      override def tell(msg: Nothing): Unit = throw new UnsupportedOperationException("cannot send to theOneWhoWalksTheBubblesOfSpaceTime")
+      override def sendSystem(signal: SystemMessage): Unit = signal match {
+        case Terminate() ⇒
+          if (terminateTriggered.compareAndSet(false, true))
+            topLevelActors.asScala.foreach(ref ⇒ ref.sendSystem(Terminate()))
+        case DeathWatchNotification(ref, _) ⇒
+          topLevelActors.remove(ref)
+          if (topLevelActors.isEmpty) {
+            terminationPromise.tryComplete(Success(Terminated(this)(null)))
+            closeScheduler()
+            dispatchers.shutdown()
+          } else if (terminateTriggered.compareAndSet(false, true))
+            topLevelActors.asScala.foreach(ref ⇒ ref.sendSystem(Terminate()))
+        case _ ⇒ // ignore
+      }
+      override def isLocal: Boolean = true
+      override def system: ActorSystemImpl[Nothing] = ActorSystemImpl.this
+    }
+
+  private def createTopLevel[U](props: Props[U], name: String): ActorRefImpl[U] = {
+    val cell = new ActorCell(this, props, theOneWhoWalksTheBubblesOfSpaceTime)
+    val ref = new LocalActorRef(rootPath / name, cell)
+    cell.setSelf(ref)
+    topLevelActors.add(ref)
+    ref.sendSystem(Create())
+    ref
+  }
+
+  private val systemGuardian: ActorRefImpl[SystemCommand] = createTopLevel(Props(systemGuardianBehavior), "system")
+  private val userGuardian: ActorRefImpl[T] = createTopLevel(_p, "user")
+
+  override def terminate(): Future[Terminated] = {
+    theOneWhoWalksTheBubblesOfSpaceTime.sendSystem(Terminate())
+    terminationPromise.future
+  }
+  override def whenTerminated: Future[Terminated] = terminationPromise.future
+
+  override def deadLetters[U]: ActorRefImpl[U] =
+    new ActorRef[U](rootPath) with ScalaActorRef[U] with ActorRefImpl[U] {
+      override def tell(msg: U): Unit = eventStream.publish(DeadLetter(msg))
+      override def sendSystem(signal: SystemMessage): Unit = eventStream.publish(DeadLetter(signal))
+      override def isLocal: Boolean = true
+      override def system: ActorSystemImpl[Nothing] = ActorSystemImpl.this
+    }
+
+  override def tell(msg: T): Unit = userGuardian.tell(msg)
   override def system: ActorSystemImpl[Nothing] = this
-  override def sendSystem(msg: SystemMessage): Unit = ???
+  override def sendSystem(msg: SystemMessage): Unit = userGuardian.sendSystem(msg)
   override def isLocal: Boolean = true
 
-  def systemActorOf(props: a.Props, name: String): Future[a.ActorRef] = ???
-  def systemActorOf[U](props: Props[U], name: String): Future[ActorRef[U]] = ???
+  def systemActorOf[U](props: Props[U], name: String)(implicit timeout: Timeout): Future[ActorRef[U]] = {
+    import AskPattern._
+    systemGuardian ? CreateSystemActor(props)
+  }
 }

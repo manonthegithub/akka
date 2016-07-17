@@ -21,6 +21,7 @@ private[typed] trait SupervisionMechanics[T] {
   protected def system: ActorSystemImpl[Nothing]
   protected def props: Props[T]
   protected def self: ActorRefImpl[T]
+  protected def parent: ActorRefImpl[Nothing]
   protected def behavior: Behavior[T]
   protected def behavior_=(b: Behavior[T]): Unit
   protected def next(b: Behavior[T], msg: Any): Unit
@@ -28,51 +29,52 @@ private[typed] trait SupervisionMechanics[T] {
   protected def terminatingMap: Map[String, ActorRefImpl[Nothing]]
   protected def stopAll(): Unit
   protected def getStatus: Int
+  protected def setTerminating(): Unit
+  protected def setClosed(): Unit
   protected def ctx: ActorContext[T]
   protected def publish(e: Logging.LogEvent): Unit
   protected def clazz(obj: AnyRef): Class[_]
+
+  // INTERFACE WITH DEATHWATCH
+  protected def addWatcher(watchee: ActorRefImpl[Nothing], watcher: ActorRefImpl[Nothing]): Unit
+  protected def remWatcher(watchee: ActorRefImpl[Nothing], watcher: ActorRefImpl[Nothing]): Unit
+  protected def watchedActorTerminated(actor: ActorRefImpl[Nothing], failure: Throwable): Boolean
+  protected def tellWatchersWeDied(): Unit
+  protected def unwatchWatchedActors(): Unit
 
   /**
    * Process one system message and return whether further messages shall be processed.
    */
   protected def processSignal(message: SystemMessage): Boolean =
-    try {
-      message match {
-        case Watch(watchee, watcher)       ⇒ true //addWatcher(watchee, watcher)
-        case Unwatch(watchee, watcher)     ⇒ true //remWatcher(watchee, watcher)
-        case DeathWatchNotification(a, at) ⇒ true //watchedActorTerminated(a, at)
-        case Create()                      ⇒ create()
-        case Terminate()                   ⇒ terminate()
-        case NoMessage                     ⇒ false // only here to suppress warning
-      }
-    } catch handleNonFatalOrInterruptedException { e ⇒
-      //handleInvokeFailure(Nil, e)
+    message match {
+      case Watch(watchee, watcher)      ⇒ { addWatcher(watchee.toImplN, watcher.toImplN); true }
+      case Unwatch(watchee, watcher)    ⇒ { remWatcher(watchee.toImplN, watcher.toImplN); true }
+      case DeathWatchNotification(a, f) ⇒ watchedActorTerminated(a.toImplN, f)
+      case Create()                     ⇒ create()
+      case Terminate()                  ⇒ terminate()
+      case NoMessage                    ⇒ false // only here to suppress warning
     }
 
-  private var _failed: Throwable = null
+  private[this] var _failed: Throwable = null
   protected def failed: Throwable = _failed
-
-  private def handleNonFatalOrInterruptedException(thunk: (Throwable) ⇒ Unit): Catcher[Boolean] = {
-    case e: InterruptedException ⇒
-      thunk(e)
-      Thread.currentThread.interrupt()
-      false
-    case NonFatal(e) ⇒
-      thunk(e)
-      false
+  protected def fail(thr: Throwable): Unit = {
+    _failed = thr
+    publish(Logging.Error(thr, self.path.toString, getClass, s"terminating due to $thr"))
+    terminate()
   }
+  protected def registerFailure(thr: Throwable): Unit =
+    if (_failed eq null) _failed = thr
 
   private def create(): Boolean = {
     behavior = props.creator()
+    if (system.settings.DebugLifecycle)
+      publish(Logging.Debug(self.path.toString, clazz(behavior), "started"))
     next(behavior.management(ctx, PreStart), PreStart)
     true
   }
 
-  // this might want to be folded into the status field
-  private val _isTerminating: Boolean = false
-  protected def isTerminating: Boolean = _isTerminating
-
   private def terminate(): Boolean = {
+    setTerminating()
     unwatchWatchedActors()
     stopAll()
     if (terminatingMap.isEmpty) {
@@ -81,7 +83,7 @@ private[typed] trait SupervisionMechanics[T] {
     } else true
   }
 
-  private def finishTerminate() {
+  private def finishTerminate(): Unit = {
     val a = behavior
     /* The following order is crucial for things to work properly. Only change this if you're very confident and lucky.
      *
@@ -89,26 +91,15 @@ private[typed] trait SupervisionMechanics[T] {
      * specific order.
      */
     try if (a ne null) a.management(ctx, PostStop)
-    catch handleNonFatalOrInterruptedException { e ⇒ publish(Logging.Error(e, self.path.toString, clazz(a), e.getMessage)) }
     //finally try stopFunctionRefs()
     finally try tellWatchersWeDied()
-    finally try unwatchWatchedActors() // stay here as we expect an emergency stop from handleInvokeFailure
+    finally try parent.sendSystem(DeathWatchNotification(self, failed))
     finally {
+      behavior = null
+      _failed = null
+      setClosed()
       if (system.settings.DebugLifecycle)
         publish(Logging.Debug(self.path.toString, clazz(a), "stopped"))
-
-      behavior = null
     }
-  }
-
-  private var watching = Set.empty[ActorRefImpl[Nothing]]
-  private var watchers = Set.empty[ActorRefImpl[Nothing]]
-
-  private def tellWatchersWeDied(): Unit = {
-
-  }
-
-  private def unwatchWatchedActors(): Unit = {
-
   }
 }

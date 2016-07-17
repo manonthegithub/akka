@@ -22,34 +22,32 @@ import akka.event.Logging
 /**
  * INTERNAL API
  */
-private[typed] object ActorCell {
+object ActorCell {
   /*
-   * bit 0-20: activation count (number of (system)messages)
-   * bit 21-30: suspend count
-   * bit 31: isClosed
+   * bit 0-29: activation count (number of (system)messages)
+   * bit 30: terminating (or terminated)
+   * bit 31: terminated
    *
    * Activation count is a bit special:
    * 0 means inactive
    * 1 means active without normal messages
    * N means active with N-1 normal messages
    */
-  final val suspendShift = 21
+  final val terminatingShift = 30
 
-  final val activationMask = (1 << suspendShift) - 1
-  val maxActivations = activationMask - Runtime.getRuntime.availableProcessors
+  final val activationMask = (1 << terminatingShift) - 1
+  // ensure that if all processors enqueue “the last message” concurrently, there is still no overflow
+  val maxActivations = activationMask - Runtime.getRuntime.availableProcessors - 1
 
-  final val suspendIncrement = 1 << suspendShift
-  final val suspendMask = (1 << (31 - suspendShift)) - 1
+  final val terminatingBit = 1 << terminatingShift
+  final val closedBit = 1 << 31
 
+  def isTerminating(status: Int): Boolean = (status & terminatingBit) != 0
   def isClosed(status: Int): Boolean = status < 0
   def isActive(status: Int): Boolean = (status & ~activationMask) == 0
-  def isSuspended(status: Int): Boolean = ((status >> suspendShift) & suspendMask) != 0
 
   def activations(status: Int): Int = status & activationMask
-  def messageCount(status: Int): Int = {
-    val act = activations(status)
-    if (act == 0) 0 else act - 1
-  }
+  def messageCount(status: Int): Int = Math.max(0, activations(status) - 1)
 
   val status = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_status"))
   val systemQueue = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_systemQueue"))
@@ -88,6 +86,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
     val cell = new ActorCell[U](system, props, self)
     val ref = new LocalActorRef[U](self.path / name, cell)
     cell.setSelf(ref)
+    childrenMap = childrenMap.updated(name, ref)
     ref.sendSystem(Create())
     ref
   }
@@ -139,17 +138,18 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
   protected def getStatus: Int = _status
   private[this] val queue: Queue[T] = new ConcurrentLinkedQueue[T]
   private[this] val maxQueue: Int = Math.min(props.queueSize, maxActivations)
-  private[this] var _systemQueue: LatestFirstSystemMessageList = SystemMessageList.LNil
+  @volatile private[this] var _systemQueue: LatestFirstSystemMessageList = SystemMessageList.LNil
 
-  protected def suspend(): Unit = unsafe.getAndAddInt(this, status, suspendIncrement)
-  protected def resume(): Unit = unsafe.getAndAddInt(this, status, -suspendIncrement)
+  protected def maySend: Boolean = !isTerminating(_status)
+  protected def setTerminating(): Unit = assert(!isTerminating(unsafe.getAndAddInt(this, status, terminatingBit)))
+  protected def setClosed(): Unit = assert(!isClosed(unsafe.getAndAddInt(this, status, closedBit)))
 
   private def handleException: Catcher[Unit] = {
     case e: InterruptedException ⇒
-      system.eventStream.publish(Error(e, self.path.toString, getClass, "interrupted during message send"))
+      publish(Error(e, self.path.toString, getClass, "interrupted during message send"))
       Thread.currentThread.interrupt()
     case NonFatal(e) ⇒
-      system.eventStream.publish(Error(e, self.path.toString, getClass, "swallowing exception during message send"))
+      publish(Error(e, self.path.toString, getClass, "swallowing exception during message send"))
   }
 
   def send(msg: T): Unit =
@@ -161,7 +161,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
         // cannot enqueue, need to give back activation token
         unsafe.getAndAddInt(this, status, -1)
         system.eventStream.publish(Dropped(msg, self))
-      } else if (isClosed(old)) {
+      } else if (isTerminating(old)) {
         system.deadLetters ! msg
       } else {
         // need to enqueue; if the actor sees the token but not the message, it will reschedule
@@ -215,6 +215,12 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
           processMessage(msg)
         }
       }
+    } catch {
+      case NonFatal(ex)       ⇒ fail(ex)
+      case ae: AssertionError ⇒ fail(ae)
+      case ie: InterruptedException ⇒
+        fail(ie)
+        Thread.currentThread.interrupt()
     } finally {
       val prev = unsafe.getAndAddInt(this, status, -processed)
       val now = prev - processed
@@ -239,7 +245,10 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
     if (!Behavior.isAlive(behavior)) self.sendSystem(Terminate())
   }
 
-  private def unhandled(msg: Any): Unit = ???
+  private def unhandled(msg: Any): Unit = msg match {
+    case Terminated(ref) ⇒ fail(DeathPactException(ref))
+    case _               ⇒ // nothing to do
+  }
 
   /**
    * Process the messages in the mailbox
@@ -253,8 +262,8 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
   @tailrec
   private def systemDrain(next: LatestFirstSystemMessageList): EarliestFirstSystemMessageList = {
     val currentList = _systemQueue
-    if (currentList.head == NoMessage) new EarliestFirstSystemMessageList(null)
-    else if (unsafe.compareAndSwapObject(this, systemQueue, currentList, next)) currentList.reverse
+    if (currentList.head == NoMessage) SystemMessageList.ENil
+    else if (unsafe.compareAndSwapObject(this, systemQueue, currentList.head, next.head)) currentList.reverse
     else systemDrain(next)
   }
 
@@ -266,19 +275,31 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
    * already dequeued message to deadLetters.
    */
   private def processAllSystemMessages(): Boolean = {
+    println("processing all messages")
     var interruption: Throwable = null
     var messageList = systemDrain(SystemMessageList.LNil)
     var continue = true
-    while ((messageList.nonEmpty) && continue) {
+    while (messageList.nonEmpty && continue) {
       val msg = messageList.head
       messageList = messageList.tail
       msg.unlink()
-      // we know here that systemInvoke ensures that only "fatal" exceptions get rethrown
-      continue = processSignal(msg)
+      continue =
+        try processSignal(msg)
+        catch {
+          case ie: InterruptedException ⇒
+            registerFailure(ie)
+            if (maySend) self.sendSystem(Terminate())
+            Thread.currentThread.interrupt()
+            true
+          case ex @ (NonFatal(_) | _: AssertionError) ⇒
+            registerFailure(ex)
+            if (maySend) self.sendSystem(Terminate())
+            true
+        }
       if (Thread.interrupted())
         interruption = new InterruptedException("Interrupted while processing system messages")
       // don’t ever execute normal message when system message present!
-      if ((messageList.isEmpty) && continue) messageList = systemDrain(SystemMessageList.LNil)
+      if (messageList.isEmpty && continue) messageList = systemDrain(SystemMessageList.LNil)
     }
     /*
      * if we closed the mailbox, we must dump the remaining system messages
@@ -295,6 +316,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
         case NonFatal(e) ⇒ system.eventStream.publish(
           Error(e, self.path.toString, this.getClass, "error while enqueuing " + msg + " to deadLetters: " + e.getMessage))
       }
+      if (isClosed(_status) && messageList.isEmpty) messageList = systemDrain(new LatestFirstSystemMessageList(NoMessage))
     }
     // if we got an interrupted exception while handling system messages, then rethrow it
     if (interruption ne null) {

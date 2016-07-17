@@ -3,7 +3,7 @@
  */
 package akka.typed
 
-import akka.event.{ EventStream, LoggingFilter, LoggingAdapter }
+import akka.event.{ LoggingFilter, LoggingAdapter, EventStream }
 import scala.concurrent.ExecutionContext
 import akka.actor.{ DynamicAccess, Scheduler }
 import java.util.concurrent.ThreadFactory

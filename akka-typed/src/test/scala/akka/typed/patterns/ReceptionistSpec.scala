@@ -95,7 +95,7 @@ class ReceptionistSpec extends TypedSpec {
       ctx.run(Find(ServiceKeyB)(q.ref))
       q.receiveMsg() should be(Listing(ServiceKeyB, Set(b.ref, c.ref)))
 
-      ctx.signal(Terminated(c.ref))
+      ctx.signal(Terminated(c.ref)(null))
       ctx.run(Find(ServiceKeyA)(q.ref))
       q.receiveMsg() should be(Listing(ServiceKeyA, Set(a.ref)))
       ctx.run(Find(ServiceKeyB)(q.ref))
