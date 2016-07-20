@@ -18,7 +18,7 @@ private[typed] trait SupervisionMechanics[T] {
   /*
    * INTERFACE WITH ACTOR CELL
    */
-  protected def system: ActorSystemImpl[Nothing]
+  protected def system: ActorSystem[Nothing]
   protected def props: Props[T]
   protected def self: ActorRefImpl[T]
   protected def parent: ActorRefImpl[Nothing]
@@ -31,6 +31,7 @@ private[typed] trait SupervisionMechanics[T] {
   protected def getStatus: Int
   protected def setTerminating(): Unit
   protected def setClosed(): Unit
+  protected def maySend: Boolean
   protected def ctx: ActorContext[T]
   protected def publish(e: Logging.LogEvent): Unit
   protected def clazz(obj: AnyRef): Class[_]
@@ -57,19 +58,24 @@ private[typed] trait SupervisionMechanics[T] {
 
   private[this] var _failed: Throwable = null
   protected def failed: Throwable = _failed
+
   protected def fail(thr: Throwable): Unit = {
-    _failed = thr
-    publish(Logging.Error(thr, self.path.toString, getClass, s"terminating due to $thr"))
-    terminate()
-  }
-  protected def registerFailure(thr: Throwable): Unit =
     if (_failed eq null) _failed = thr
+    publish(Logging.Error(thr, self.path.toString, getClass, s"terminating due to $thr"))
+    if (maySend) self.sendSystem(Terminate())
+  }
 
   private def create(): Boolean = {
-    behavior = props.creator()
-    if (system.settings.DebugLifecycle)
-      publish(Logging.Debug(self.path.toString, clazz(behavior), "started"))
-    next(behavior.management(ctx, PreStart), PreStart)
+    behavior = Behavior.canonicalize(props.creator(), behavior)
+    if (behavior == null) {
+      publish(Logging.Error(self.path.toString, getClass, "cannot start actor with “same” or “unhandled” behavior, terminating"))
+      self.sendSystem(Terminate())
+    } else {
+      if (system.settings.DebugLifecycle)
+        publish(Logging.Debug(self.path.toString, clazz(behavior), "started"))
+      if (Behavior.isAlive(behavior)) next(behavior.management(ctx, PreStart), PreStart)
+      else self.sendSystem(Terminate())
+    }
     true
   }
 

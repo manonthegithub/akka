@@ -49,8 +49,8 @@ object ActorCell {
   def activations(status: Int): Int = status & activationMask
   def messageCount(status: Int): Int = Math.max(0, activations(status) - 1)
 
-  val status = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_status"))
-  val systemQueue = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_systemQueue"))
+  val statusOffset = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_status"))
+  val systemQueueOffset = unsafe.objectFieldOffset(classOf[ActorCell[_]].getDeclaredField("_systemQueue"))
 
   final val DefaultState = 0
   final val SuspendedState = 1
@@ -60,10 +60,10 @@ object ActorCell {
 /**
  * INTERNAL API
  */
-private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
+private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
                                   override val props: Props[T],
                                   val parent: ActorRefImpl[Nothing])
-  extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
+    extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
 
   /*
    * Implementation of the ActorContext trait.
@@ -141,8 +141,8 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
   @volatile private[this] var _systemQueue: LatestFirstSystemMessageList = SystemMessageList.LNil
 
   protected def maySend: Boolean = !isTerminating(_status)
-  protected def setTerminating(): Unit = assert(!isTerminating(unsafe.getAndAddInt(this, status, terminatingBit)))
-  protected def setClosed(): Unit = assert(!isClosed(unsafe.getAndAddInt(this, status, closedBit)))
+  protected def setTerminating(): Unit = assert(!isTerminating(unsafe.getAndAddInt(this, statusOffset, terminatingBit)))
+  protected def setClosed(): Unit = assert(!isClosed(unsafe.getAndAddInt(this, statusOffset, closedBit)))
 
   private def handleException: Catcher[Unit] = {
     case e: InterruptedException ⇒
@@ -154,20 +154,21 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
 
   def send(msg: T): Unit =
     try {
-      val old = unsafe.getAndAddInt(this, status, 1)
+      val old = unsafe.getAndAddInt(this, statusOffset, 1)
       val oldActivations = activations(old)
       // this is not an off-by-one: #msgs is activations-1 if >0
       if (oldActivations > maxQueue) {
         // cannot enqueue, need to give back activation token
-        unsafe.getAndAddInt(this, status, -1)
+        unsafe.getAndAddInt(this, statusOffset, -1)
         system.eventStream.publish(Dropped(msg, self))
       } else if (isTerminating(old)) {
+        unsafe.getAndAddInt(this, statusOffset, -1)
         system.deadLetters ! msg
       } else {
         // need to enqueue; if the actor sees the token but not the message, it will reschedule
         queue.add(msg)
-        if (oldActivations == 0 && isActive(old)) {
-          unsafe.getAndAddInt(this, status, 1) // the first 1 was just the “active” bit, now add 1msg
+        if (oldActivations == 0) {
+          unsafe.getAndAddInt(this, statusOffset, 1) // the first 1 was just the “active” bit, now add 1msg
           // if the actor was not yet running, set it in motion; spurious wakeups don’t hurt
           executionContext.execute(this)
         }
@@ -178,10 +179,10 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
     @tailrec def needToActivate(): Boolean = {
       val currentList = _systemQueue
       if (currentList.head == NoMessage) {
-        system.deadLetters.sendSystem(signal)
+        system.deadLetters.toImpl.sendSystem(signal)
         false
       } else {
-        unsafe.compareAndSwapObject(this, systemQueue, currentList.head, (signal :: currentList).head) || {
+        unsafe.compareAndSwapObject(this, systemQueueOffset, currentList.head, (signal :: currentList).head) || {
           signal.unlink()
           needToActivate()
         }
@@ -189,7 +190,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
     }
     try {
       if (needToActivate()) {
-        val old = unsafe.getAndAddInt(this, status, 1)
+        val old = unsafe.getAndAddInt(this, statusOffset, 1)
         if (isClosed(old)) {
           // nothing to do
         } else if (activations(old) == 0) {
@@ -197,7 +198,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
           executionContext.execute(this)
         } else {
           // take back that token: we didn’t actually enqueue a normal message and the actor was already active
-          unsafe.getAndAddInt(this, status, -1)
+          unsafe.getAndAddInt(this, statusOffset, -1)
         }
       }
     } catch handleException
@@ -216,21 +217,20 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
         }
       }
     } catch {
-      case NonFatal(ex)       ⇒ fail(ex)
-      case ae: AssertionError ⇒ fail(ae)
+      case NonFatal(ex) ⇒ fail(ex)
       case ie: InterruptedException ⇒
         fail(ie)
         Thread.currentThread.interrupt()
     } finally {
-      val prev = unsafe.getAndAddInt(this, status, -processed)
+      val prev = unsafe.getAndAddInt(this, statusOffset, -processed)
       val now = prev - processed
       if (isClosed(now)) {
         // we’re finished
       } else if (now > 1) {
         executionContext.execute(this)
       } else {
-        val again = unsafe.getAndAddInt(this, status, -1)
-        if (again > 1) {
+        val again = unsafe.getAndAddInt(this, statusOffset, -1)
+        if (again > 1 || _systemQueue.head != null) {
           executionContext.execute(this)
         }
       }
@@ -263,7 +263,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
   private def systemDrain(next: LatestFirstSystemMessageList): EarliestFirstSystemMessageList = {
     val currentList = _systemQueue
     if (currentList.head == NoMessage) SystemMessageList.ENil
-    else if (unsafe.compareAndSwapObject(this, systemQueue, currentList.head, next.head)) currentList.reverse
+    else if (unsafe.compareAndSwapObject(this, systemQueueOffset, currentList.head, next.head)) currentList.reverse
     else systemDrain(next)
   }
 
@@ -275,7 +275,6 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
    * already dequeued message to deadLetters.
    */
   private def processAllSystemMessages(): Boolean = {
-    println("processing all messages")
     var interruption: Throwable = null
     var messageList = systemDrain(SystemMessageList.LNil)
     var continue = true
@@ -287,13 +286,11 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
         try processSignal(msg)
         catch {
           case ie: InterruptedException ⇒
-            registerFailure(ie)
-            if (maySend) self.sendSystem(Terminate())
+            fail(ie)
             Thread.currentThread.interrupt()
             true
           case ex @ (NonFatal(_) | _: AssertionError) ⇒
-            registerFailure(ex)
-            if (maySend) self.sendSystem(Terminate())
+            fail(ex)
             true
         }
       if (Thread.interrupted())
@@ -310,7 +307,7 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
       val msg = messageList.head
       messageList = messageList.tail
       msg.unlink()
-      try dlm.sendSystem(msg)
+      try dlm.toImpl.sendSystem(msg)
       catch {
         case e: InterruptedException ⇒ interruption = e
         case NonFatal(e) ⇒ system.eventStream.publish(
@@ -330,4 +327,6 @@ private[typed] class ActorCell[T](override val system: ActorSystemImpl[Nothing],
   protected final def publish(e: Logging.LogEvent): Unit = try system.eventStream.publish(e) catch { case NonFatal(_) ⇒ }
 
   protected final def clazz(o: AnyRef): Class[_] = if (o eq null) this.getClass else o.getClass
+
+  override def toString: String = f"ActorCell(status = ${_status}%08x, queue = $queue)"
 }

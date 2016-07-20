@@ -149,7 +149,7 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
     case _            ⇒
   }
 
-  override val dispatchers: Dispatchers = new Dispatchers(settings, log)
+  override val dispatchers: Dispatchers = new DispatchersImpl(settings, log)
   override val executionContext: ExecutionContextExecutor = dispatchers.lookup(DispatcherDefault)
 
   override val startTime: Long = System.currentTimeMillis()
@@ -179,7 +179,6 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
         case _ ⇒ // ignore
       }
       override def isLocal: Boolean = true
-      override def system: ActorSystemImpl[Nothing] = ActorSystemImpl.this
     }
 
   private def createTopLevel[U](props: Props[U], name: String): ActorRefImpl[U] = {
@@ -205,11 +204,9 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
       override def tell(msg: U): Unit = eventStream.publish(DeadLetter(msg))
       override def sendSystem(signal: SystemMessage): Unit = eventStream.publish(DeadLetter(signal))
       override def isLocal: Boolean = true
-      override def system: ActorSystemImpl[Nothing] = ActorSystemImpl.this
     }
 
   override def tell(msg: T): Unit = userGuardian.tell(msg)
-  override def system: ActorSystemImpl[Nothing] = this
   override def sendSystem(msg: SystemMessage): Unit = userGuardian.sendSystem(msg)
   override def isLocal: Boolean = true
 

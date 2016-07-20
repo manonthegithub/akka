@@ -23,7 +23,7 @@ private[typed] trait DeathWatch[T] {
   /*
    * INTERFACE WITH ACTORCELL
    */
-  protected def system: ActorSystemImpl[Nothing]
+  protected def system: ActorSystem[Nothing]
   protected def self: ActorRefImpl[T]
   protected def parent: ActorRefImpl[Nothing]
   protected def behavior: Behavior[T]
