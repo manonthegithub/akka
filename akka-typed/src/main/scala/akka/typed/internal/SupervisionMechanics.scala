@@ -25,10 +25,8 @@ private[typed] trait SupervisionMechanics[T] {
   protected def behavior: Behavior[T]
   protected def behavior_=(b: Behavior[T]): Unit
   protected def next(b: Behavior[T], msg: Any): Unit
-  protected def childrenMap: Map[String, ActorRefImpl[Nothing]]
   protected def terminatingMap: Map[String, ActorRefImpl[Nothing]]
   protected def stopAll(): Unit
-  protected def getStatus: Int
   protected def setTerminating(): Unit
   protected def setClosed(): Unit
   protected def maySend: Boolean
@@ -68,8 +66,7 @@ private[typed] trait SupervisionMechanics[T] {
   private def create(): Boolean = {
     behavior = Behavior.canonicalize(props.creator(), behavior)
     if (behavior == null) {
-      publish(Logging.Error(self.path.toString, getClass, "cannot start actor with “same” or “unhandled” behavior, terminating"))
-      self.sendSystem(Terminate())
+      fail(new IllegalStateException("cannot start actor with “same” or “unhandled” behavior, terminating"))
     } else {
       if (system.settings.DebugLifecycle)
         publish(Logging.Debug(self.path.toString, clazz(behavior), "started"))
@@ -89,7 +86,7 @@ private[typed] trait SupervisionMechanics[T] {
     } else true
   }
 
-  private def finishTerminate(): Unit = {
+  protected def finishTerminate(): Unit = {
     val a = behavior
     /* The following order is crucial for things to work properly. Only change this if you're very confident and lucky.
      *

@@ -63,7 +63,7 @@ object ActorCell {
 private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
                                   override val props: Props[T],
                                   val parent: ActorRefImpl[Nothing])
-  extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
+    extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
 
   /*
    * Implementation of the ActorContext trait.
@@ -73,6 +73,17 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
   protected var terminatingMap = Map.empty[String, ActorRefImpl[Nothing]]
   override def children: Iterable[ActorRef[Nothing]] = childrenMap.values
   override def child(name: String): Option[ActorRef[Nothing]] = childrenMap.get(name)
+  protected def removeChild(actor: ActorRefImpl[Nothing]): Unit = {
+    val n = actor.path.name
+    childrenMap.get(n) match {
+      case Some(`actor`) ⇒ childrenMap -= n
+      case _ ⇒
+        terminatingMap.get(n) match {
+          case Some(`actor`) => terminatingMap -= n
+          case _             =>
+        }
+    }
+  }
 
   private var _self: ActorRefImpl[T] = _
   private[typed] def setSelf(ref: ActorRefImpl[T]): Unit = _self = ref
@@ -140,8 +151,9 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
   private[this] val maxQueue: Int = Math.min(props.queueSize, maxActivations)
   @volatile private[this] var _systemQueue: LatestFirstSystemMessageList = SystemMessageList.LNil
 
-  protected def maySend: Boolean = !isTerminating(_status)
-  protected def setTerminating(): Unit = assert(!isTerminating(unsafe.getAndAddInt(this, statusOffset, terminatingBit)))
+  protected def maySend: Boolean = !isTerminating
+  protected def isTerminating: Boolean = ActorCell.isTerminating(_status)
+  protected def setTerminating(): Unit = assert(!ActorCell.isTerminating(unsafe.getAndAddInt(this, statusOffset, terminatingBit)))
   protected def setClosed(): Unit = assert(!isClosed(unsafe.getAndAddInt(this, statusOffset, closedBit)))
 
   private def handleException: Catcher[Unit] = {
@@ -161,7 +173,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
         // cannot enqueue, need to give back activation token
         unsafe.getAndAddInt(this, statusOffset, -1)
         system.eventStream.publish(Dropped(msg, self))
-      } else if (isTerminating(old)) {
+      } else if (ActorCell.isTerminating(old)) {
         unsafe.getAndAddInt(this, statusOffset, -1)
         system.deadLetters ! msg
       } else {
@@ -303,6 +315,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
      * to deadLetters (this is essential for DeathWatch)
      */
     val dlm = system.deadLetters
+    if (isClosed(_status) && messageList.isEmpty) messageList = systemDrain(new LatestFirstSystemMessageList(NoMessage))
     while (messageList.nonEmpty) {
       val msg = messageList.head
       messageList = messageList.tail

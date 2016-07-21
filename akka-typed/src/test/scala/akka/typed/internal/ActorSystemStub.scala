@@ -10,8 +10,8 @@ import com.typesafe.config.ConfigFactory
 import java.util.concurrent.ThreadFactory
 
 private[typed] class ActorSystemStub(val name: String)
-  extends ActorRef[Nothing](a.RootActorPath(a.Address("akka", name)) / "user")
-  with ActorSystem[Nothing] with ScalaActorRef[Nothing] with ActorRefImpl[Nothing] {
+    extends ActorRef[Nothing](a.RootActorPath(a.Address("akka", name)) / "user")
+    with ActorSystem[Nothing] with ScalaActorRef[Nothing] with ActorRefImpl[Nothing] {
 
   override val settings: a.ActorSystem.Settings = new a.ActorSystem.Settings(getClass.getClassLoader, ConfigFactory.empty, name)
 
@@ -21,8 +21,8 @@ private[typed] class ActorSystemStub(val name: String)
   override def sendSystem(signal: akka.typed.internal.SystemMessage): Unit =
     throw new RuntimeException("must not send SYSTEM message to ActorSystemStub")
 
-  val deadLettersInbox = Inbox[Any]("deadLetters")
-  override def deadLetters[U]: akka.typed.ActorRef[U] = deadLettersInbox.ref
+  val deadLettersInbox = new DebugRef[Any](path.parent / "deadLetters", true)
+  override def deadLetters[U]: akka.typed.ActorRef[U] = deadLettersInbox
 
   val controlledExecutor = new ControlledExecutor
   implicit override def executionContext: scala.concurrent.ExecutionContextExecutor = controlledExecutor

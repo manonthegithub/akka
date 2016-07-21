@@ -30,10 +30,14 @@ private[typed] trait DeathWatch[T] {
   protected def next(b: Behavior[T], msg: Any): Unit
   protected def childrenMap: Map[String, ActorRefImpl[Nothing]]
   protected def terminatingMap: Map[String, ActorRefImpl[Nothing]]
+  protected def isTerminating: Boolean
   protected def ctx: ActorContext[T]
   protected def maySend: Boolean
   protected def publish(e: Logging.LogEvent): Unit
   protected def clazz(obj: AnyRef): Class[_]
+
+  protected def removeChild(actor: ActorRefImpl[Nothing]): Unit
+  protected def finishTerminate(): Unit
 
   type ARImpl = ActorRefImpl[Nothing]
 
@@ -76,14 +80,11 @@ private[typed] trait DeathWatch[T] {
         next(behavior.management(ctx, t), t)
       }
     }
-    childrenMap.get(actor.path.name) match {
-      case Some(`actor`) ⇒ handleChildTerminated(actor)
-      case _             ⇒ true
-    }
-  }
-
-  private def handleChildTerminated(actor: ARImpl): Boolean = {
-    ???
+    removeChild(actor)
+    if (isTerminating && terminatingMap.isEmpty) {
+      finishTerminate()
+      false
+    } else true
   }
 
   protected def tellWatchersWeDied(): Unit =
