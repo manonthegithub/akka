@@ -63,7 +63,7 @@ object ActorCell {
 private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
                                   override val props: Props[T],
                                   val parent: ActorRefImpl[Nothing])
-    extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
+  extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
 
   /*
    * Implementation of the ActorContext trait.

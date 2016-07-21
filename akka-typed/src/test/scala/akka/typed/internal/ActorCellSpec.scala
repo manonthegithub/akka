@@ -23,7 +23,7 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
     def `must be creatable`(): Unit = {
       val parent = new DebugRef[String](sys.path / "creatable", true)
       val cell = new ActorCell(sys, Props({ parent ! "created"; Static[String] { s ⇒ parent ! s } }), parent)
-      debug(cell) {
+      debugCell(cell) {
         ec.queueSize should ===(0)
         cell.sendSystem(Create())
         ec.runOne()
@@ -42,7 +42,7 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
       val ??? = new NotImplementedError
       val cell = new ActorCell(sys, Props[String]({ parent ! "created"; throw ??? }), parent)
       cell.setSelf(self)
-      debug(cell) {
+      debugCell(cell) {
         ec.queueSize should ===(0)
         cell.sendSystem(Create())
         ec.runOne()
@@ -61,7 +61,7 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
       val self = new DebugRef[String](sys.path / "terminateSelf", true)
       val cell = new ActorCell(sys, Props({ parent ! "created"; Stopped[String] }), parent)
       cell.setSelf(self)
-      debug(cell) {
+      debugCell(cell) {
         ec.queueSize should ===(0)
         cell.sendSystem(Create())
         ec.runOne()
@@ -78,9 +78,9 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
     def `must be able to terminate after PreStart`(): Unit = {
       val parent = new DebugRef[String](sys.path / "terminate", true)
       val self = new DebugRef[String](sys.path / "terminateSelf", true)
-      val cell = new ActorCell(sys, Props({ parent ! "created"; Full[String] { case Sig(ctx, PreStart) => Stopped } }), parent)
+      val cell = new ActorCell(sys, Props({ parent ! "created"; Full[String] { case Sig(ctx, PreStart) ⇒ Stopped } }), parent)
       cell.setSelf(self)
-      debug(cell) {
+      debugCell(cell) {
         ec.queueSize should ===(0)
         cell.sendSystem(Create())
         ec.runOne()
@@ -98,9 +98,9 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
       val parent = new DebugRef[String](sys.path / "terminate", true)
       val self = new DebugRef[String](sys.path / "terminateSelf", true)
       val ex = new AssertionError
-      val cell = new ActorCell(sys, Props({ parent ! "created"; Static[String](s => throw ex) }), parent)
+      val cell = new ActorCell(sys, Props({ parent ! "created"; Static[String](s ⇒ throw ex) }), parent)
       cell.setSelf(self)
-      debug(cell) {
+      debugCell(cell) {
         ec.queueSize should ===(0)
         cell.sendSystem(Create())
         ec.runOne()
@@ -116,9 +116,31 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
         parent.receiveAll() should ===(Left(DeathWatchNotification(self, ex)) :: Nil)
       }
     }
+
+    def `must signal failure when starting behavior is "same"`(): Unit = pending
+
+    def `must signal failure when starting behavior is "unhandled"`(): Unit = pending
+
+    def `must not reschedule for message when already activated`(): Unit = pending
+
+    def `must not reschedule for signal when already activated`(): Unit = pending
+
+    def `must reschedule for self-message`(): Unit = pending
+
+    def `must reschedule when signal is enqueued after processing but before deactivation`(): Unit = pending
+
+    def `must signal DeathWatch when terminating normally`(): Unit = pending
+
+    def `must signal DeathWatch when terminating abnormally`(): Unit = pending
+
+    def `must signal DeathWatch when watching after termination`(): Unit = pending
+
+    def `must signal DeathWatch when watching after termination but before deactivation`(): Unit = pending
+
+    def `must not signal DeathWatch after Unwatch has been processed`(): Unit = pending
   }
 
-  private def debug[T, U](cell: ActorCell[T])(block: ⇒ U): U =
+  private def debugCell[T, U](cell: ActorCell[T])(block: ⇒ U): U =
     try block
     catch {
       case ex: TestFailedException ⇒
