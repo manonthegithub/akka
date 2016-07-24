@@ -55,6 +55,8 @@ object ActorCell {
   final val DefaultState = 0
   final val SuspendedState = 1
   final val SuspendedWaitForChildrenState = 2
+
+  final val Debug = false
 }
 
 /**
@@ -63,7 +65,7 @@ object ActorCell {
 private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
                                   override val props: Props[T],
                                   val parent: ActorRefImpl[Nothing])
-    extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
+  extends ActorContext[T] with Runnable with SupervisionMechanics[T] with DeathWatch[T] {
 
   /*
    * Implementation of the ActorContext trait.
@@ -79,8 +81,8 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
       case Some(`actor`) ⇒ childrenMap -= n
       case _ ⇒
         terminatingMap.get(n) match {
-          case Some(`actor`) => terminatingMap -= n
-          case _             =>
+          case Some(`actor`) ⇒ terminatingMap -= n
+          case _             ⇒
         }
     }
   }
@@ -217,6 +219,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
   }
 
   override final def run(): Unit = {
+    if (Debug) println(s"entering run($self): interrupted=${Thread.interrupted()}")
     val status = _status
     val msgs = messageCount(status)
     var processed = 0
@@ -232,6 +235,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
       case NonFatal(ex) ⇒ fail(ex)
       case ie: InterruptedException ⇒
         fail(ie)
+        if (Debug) println(s"interrupting due to catching InterruptedException")
         Thread.currentThread.interrupt()
     } finally {
       val prev = unsafe.getAndAddInt(this, statusOffset, -processed)
@@ -247,6 +251,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
         }
       }
     }
+    if (Debug) println(s" exiting run($self): interrupted=${Thread.interrupted()}")
   }
 
   protected var behavior: Behavior[T] = _
@@ -266,6 +271,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
    * Process the messages in the mailbox
    */
   private def processMessage(msg: T): Unit = {
+    if (Debug) println(s"actor $self processing message $msg")
     next(behavior.message(this, msg), msg)
     if (Thread.interrupted())
       throw new InterruptedException("Interrupted while processing actor messages")
@@ -299,13 +305,18 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
         catch {
           case ie: InterruptedException ⇒
             fail(ie)
+            if (Debug) println(s"interrupting due to catching InterruptedException during system message processing")
             Thread.currentThread.interrupt()
             true
           case ex @ (NonFatal(_) | _: AssertionError) ⇒
             fail(ex)
             true
         }
-      if (Thread.interrupted())
+      /*
+       * the second part of the condition is necessary to avoid logging an InterruptedException
+       * from the systemGuardian during shutdown
+       */
+      if (Thread.interrupted() && system.whenTerminated.value.isEmpty)
         interruption = new InterruptedException("Interrupted while processing system messages")
       // don’t ever execute normal message when system message present!
       if (messageList.isEmpty && continue) messageList = systemDrain(SystemMessageList.LNil)
@@ -319,6 +330,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
     while (messageList.nonEmpty) {
       val msg = messageList.head
       messageList = messageList.tail
+      if (Debug) println(s"actor $self dropping dead system message $msg")
       msg.unlink()
       try dlm.toImpl.sendSystem(msg)
       catch {
@@ -330,6 +342,7 @@ private[typed] class ActorCell[T](override val system: ActorSystem[Nothing],
     }
     // if we got an interrupted exception while handling system messages, then rethrow it
     if (interruption ne null) {
+      if (Debug) println(s"actor $self throwing interruption")
       Thread.interrupted() // clear interrupted flag before throwing according to java convention
       throw interruption
     }

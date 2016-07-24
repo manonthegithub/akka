@@ -44,7 +44,8 @@ private[typed] trait SupervisionMechanics[T] {
   /**
    * Process one system message and return whether further messages shall be processed.
    */
-  protected def processSignal(message: SystemMessage): Boolean =
+  protected def processSignal(message: SystemMessage): Boolean = {
+    if (ActorCell.Debug) println(s"actor $self processing system message $message")
     message match {
       case Watch(watchee, watcher)      ⇒ { addWatcher(watchee.toImplN, watcher.toImplN); true }
       case Unwatch(watchee, watcher)    ⇒ { remWatcher(watchee.toImplN, watcher.toImplN); true }
@@ -53,6 +54,7 @@ private[typed] trait SupervisionMechanics[T] {
       case Terminate()                  ⇒ terminate()
       case NoMessage                    ⇒ false // only here to suppress warning
     }
+  }
 
   private[this] var _failed: Throwable = null
   protected def failed: Throwable = _failed

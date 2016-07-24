@@ -10,8 +10,8 @@ import com.typesafe.config.ConfigFactory
 import java.util.concurrent.ThreadFactory
 
 private[typed] class ActorSystemStub(val name: String)
-    extends ActorRef[Nothing](a.RootActorPath(a.Address("akka", name)) / "user")
-    with ActorSystem[Nothing] with ScalaActorRef[Nothing] with ActorRefImpl[Nothing] {
+  extends ActorRef[Nothing](a.RootActorPath(a.Address("akka", name)) / "user")
+  with ActorSystem[Nothing] with ScalaActorRef[Nothing] with ActorRefImpl[Nothing] {
 
   override val settings: a.ActorSystem.Settings = new a.ActorSystem.Settings(getClass.getClassLoader, ConfigFactory.empty, name)
 

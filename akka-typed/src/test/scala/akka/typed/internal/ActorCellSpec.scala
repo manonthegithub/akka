@@ -138,11 +138,11 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
         ec.runOne()
         ec.queueSize should ===(0)
         parent.receiveAll() match {
-          case Left(DeathWatchNotification(`self`, exc)) :: Nil =>
+          case Left(DeathWatchNotification(`self`, exc)) :: Nil ⇒
             exc should not be null
             exc shouldBe an[IllegalStateException]
             exc.getMessage should include("same")
-          case other => fail(s"$other was not a DeathWatchNotification")
+          case other ⇒ fail(s"$other was not a DeathWatchNotification")
         }
       }
     }
@@ -164,11 +164,11 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
         ec.runOne()
         ec.queueSize should ===(0)
         parent.receiveAll() match {
-          case Left(DeathWatchNotification(`self`, exc)) :: Nil =>
+          case Left(DeathWatchNotification(`self`, exc)) :: Nil ⇒
             exc should not be null
             exc shouldBe an[IllegalStateException]
             exc.getMessage should include("same")
-          case other => fail(s"$other was not a DeathWatchNotification")
+          case other ⇒ fail(s"$other was not a DeathWatchNotification")
         }
       }
     }
@@ -181,7 +181,7 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
      */
     def `must not execute more messages than were batched naturally`(): Unit = {
       val parent = new DebugRef[String](sys.path / "batching", true)
-      val cell = new ActorCell(sys, Props(SelfAware[String] { self => Static { s ⇒ self ! s; parent ! s } }), parent)
+      val cell = new ActorCell(sys, Props(SelfAware[String] { self ⇒ Static { s ⇒ self ! s; parent ! s } }), parent)
       val ref = new LocalActorRef(parent.path / "child", cell)
       cell.setSelf(ref)
       debugCell(cell) {
@@ -238,7 +238,7 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
       val parent = new DebugRef[String](sys.path / "watchAbnormal", true)
       val client = new DebugRef[String](parent.path / "client", true)
       val other = new DebugRef[String](parent.path / "other", true)
-      val cell = new ActorCell(sys, Props(ContextAware[String] { ctx => ctx.watch(parent); Empty }), parent)
+      val cell = new ActorCell(sys, Props(ContextAware[String] { ctx ⇒ ctx.watch(parent); Empty }), parent)
       val ref = new LocalActorRef(parent.path / "child", cell)
       cell.setSelf(ref)
       debugCell(cell) {
@@ -258,10 +258,10 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
         ec.runOne()
         ec.queueSize should ===(0)
         parent.receiveAll() match {
-          case Left(DeathWatchNotification(ref, exc)) :: Nil =>
+          case Left(DeathWatchNotification(ref, exc)) :: Nil ⇒
             exc should not be null
             exc shouldBe a[DeathPactException]
-          case other => fail(s"$other was not a DeathWatchNotification")
+          case other ⇒ fail(s"$other was not a DeathWatchNotification")
         }
         client.receiveAll() should ===(Left(DeathWatchNotification(ref, null)) :: Nil)
       }
@@ -282,10 +282,9 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
         cell.sendSystem(Watch(ref, client))
         ec.queueSize should ===(0)
         sys.deadLettersInbox.receiveAll() should ===(Left(Watch(ref, client)) :: Nil)
+        // correct behavior of deadLetters is verified in ActorSystemSpec
       }
     }
-
-    // FIXME: also test that DeadLetters does the right thing when getting a Watch()
 
     def `must signal DeathWatch when watching after termination but before deactivation`(): Unit = {
       val parent = new DebugRef[String](sys.path / "watchSomewhatLate", true)
@@ -350,8 +349,8 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
    */
   def `must not terminate before children have terminated`(): Unit = {
     val parent = new DebugRef[ActorRef[Nothing]](sys.path / "sendDeadLetters", true)
-    val cell = new ActorCell(sys, Props(ContextAware[String] { ctx =>
-      ctx.spawn(Props(SelfAware[String] { self => parent ! self; Empty }), "child")
+    val cell = new ActorCell(sys, Props(ContextAware[String] { ctx ⇒
+      ctx.spawn(Props(SelfAware[String] { self ⇒ parent ! self; Empty }), "child")
       Empty
     }), parent)
     val ref = new LocalActorRef(parent.path / "child", cell)
@@ -364,10 +363,10 @@ class ActorCellSpec extends Spec with Matchers with BeforeAndAfterAll with Scala
       ec.runOne() // creating child
       ec.queueSize should ===(0)
       val child = parent.receiveAll() match {
-        case Right(child) :: Nil =>
+        case Right(child) :: Nil ⇒
           child.toImplN.sendSystem(Watch(child, parent))
           child
-        case other => fail(s"$other was not List(Right(<child>))")
+        case other ⇒ fail(s"$other was not List(Right(<child>))")
       }
       ec.runOne()
       ec.queueSize should ===(0)

@@ -22,9 +22,18 @@ import akka.util.Timeout
 import java.io.Closeable
 
 object ActorSystemImpl {
+  import ScalaDSL._
+
   sealed trait SystemCommand
-  case class CreateSystemActor[T](props: Props[T])(replyTo: ActorRef[ActorRef[T]]) extends SystemCommand
-  val systemGuardianBehavior: Behavior[SystemCommand] = ???
+  case class CreateSystemActor[T](props: Props[T])(val replyTo: ActorRef[ActorRef[T]]) extends SystemCommand
+
+  val systemGuardianBehavior: Behavior[SystemCommand] =
+    ContextAware { ctx ⇒
+      Static {
+        case create: CreateSystemActor[t] ⇒
+          create.replyTo ! ctx.spawnAnonymous(create.props)
+      }
+    }
 }
 
 /*
@@ -202,7 +211,13 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
   override def deadLetters[U]: ActorRefImpl[U] =
     new ActorRef[U](rootPath) with ScalaActorRef[U] with ActorRefImpl[U] {
       override def tell(msg: U): Unit = eventStream.publish(DeadLetter(msg))
-      override def sendSystem(signal: SystemMessage): Unit = eventStream.publish(DeadLetter(signal))
+      override def sendSystem(signal: SystemMessage): Unit = {
+        signal match {
+          case Watch(watchee, watcher) ⇒ watcher.toImplN.sendSystem(DeathWatchNotification(watchee, null))
+          case _                       ⇒ // all good
+        }
+        eventStream.publish(DeadLetter(signal))
+      }
       override def isLocal: Boolean = true
     }
 

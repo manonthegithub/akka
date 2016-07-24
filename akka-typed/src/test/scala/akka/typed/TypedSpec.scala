@@ -21,10 +21,12 @@ import akka.testkit.TestEvent.Mute
 import org.scalatest.concurrent.ScalaFutures
 import org.scalactic.ConversionCheckedTripleEquals
 import org.scalactic.Constraint
+import org.junit.runner.RunWith
 
 /**
  * Helper class for writing tests for typed Actors with ScalaTest.
  */
+@RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class TypedSpec(config: Config) extends Spec with Matchers with BeforeAndAfterAll with ScalaFutures with ConversionCheckedTripleEquals {
   import TypedSpec._
   import AskPattern._
