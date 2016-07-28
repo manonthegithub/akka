@@ -162,7 +162,7 @@ private[typed] class ActorSystemImpl[-T](override val name: String,
   override val executionContext: ExecutionContextExecutor = dispatchers.lookup(DispatcherDefault)
 
   override val startTime: Long = System.currentTimeMillis()
-  override def uptime: Long = System.currentTimeMillis() - startTime
+  override def uptime: Long = (System.currentTimeMillis() - startTime) / 1000
 
   private val terminationPromise: Promise[Terminated] = Promise()
 

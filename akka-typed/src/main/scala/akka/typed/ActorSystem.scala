@@ -5,10 +5,11 @@ package akka.typed
 
 import akka.event.{ LoggingFilter, LoggingAdapter, EventStream }
 import scala.concurrent.ExecutionContext
-import akka.actor.{ DynamicAccess, Scheduler }
+import akka.{ actor ⇒ a }
 import java.util.concurrent.ThreadFactory
 import com.typesafe.config.{ Config, ConfigFactory }
 import scala.concurrent.{ ExecutionContextExecutor, Future }
+import akka.typed.adapter.{ PropsAdapter, ActorSystemAdapter }
 
 /**
  * An ActorSystem is home to a hierarchy of Actors. It is created using
@@ -60,14 +61,14 @@ trait ActorSystem[-T] extends ActorRef[T] { this: ScalaActorRef[T] with internal
    * set on all threads created by the ActorSystem, if one was set during
    * creation.
    */
-  def dynamicAccess: DynamicAccess
+  def dynamicAccess: a.DynamicAccess
 
   /**
    * A generic scheduler that can initiate the execution of tasks after some delay.
    * It is recommended to use the ActorContext’s scheduling capabilities for sending
    * messages to actors instead of registering a Runnable for execution using this facility.
    */
-  def scheduler: Scheduler
+  def scheduler: a.Scheduler
 
   /**
    * Main event bus of this actor system, used for example for logging.
@@ -114,5 +115,16 @@ object ActorSystem {
     val cl = classLoader.getOrElse(akka.actor.ActorSystem.findClassLoader())
     val appConfig = config.getOrElse(ConfigFactory.load(cl))
     new ActorSystemImpl(name, appConfig, cl, executionContext, guardianProps)
+  }
+
+  def adapter[T](name: String, guardianProps: Props[T],
+                 config: Option[Config] = None,
+                 classLoader: Option[ClassLoader] = None,
+                 executionContext: Option[ExecutionContext] = None): ActorSystem[T] = {
+    val cl = classLoader.getOrElse(akka.actor.ActorSystem.findClassLoader())
+    val appConfig = config.getOrElse(ConfigFactory.load(cl))
+    val untyped = new a.ActorSystemImpl(name, appConfig, cl, executionContext, Some(PropsAdapter(guardianProps)))
+    untyped.start()
+    new ActorSystemAdapter(untyped)
   }
 }

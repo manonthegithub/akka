@@ -25,20 +25,20 @@ class ActorSystemSpec extends Spec with Matchers with BeforeAndAfterAll with Sca
   trait CommonTests {
     def system[T](name: String, props: Props[T]): ActorSystem[T]
 
-    def withSystem[T](name: String, props: Props[T], doTerminate: Boolean = true)(block: ActorSystem[T] => Unit): Terminated = {
+    def withSystem[T](name: String, props: Props[T], doTerminate: Boolean = true)(block: ActorSystem[T] ⇒ Unit): Terminated = {
       val sys = system(name, props)
       try {
         block(sys)
         if (doTerminate) sys.terminate().futureValue else sys.whenTerminated.futureValue
       } catch {
-        case NonFatal(ex) =>
+        case NonFatal(ex) ⇒
           sys.terminate()
           throw ex
       }
     }
 
     def `must start the guardian actor and terminate when it terminates`(): Unit = {
-      val t = withSystem("a", Props(Total[Probe] { p ⇒ p.replyTo ! p.msg; Stopped }), doTerminate = false) { sys =>
+      val t = withSystem("a", Props(Total[Probe] { p ⇒ p.replyTo ! p.msg; Stopped }), doTerminate = false) { sys ⇒
         val inbox = Inbox[String]("a")
         sys ! Probe("hello", inbox.ref)
         eventually { inbox.hasMessages should ===(true) }
@@ -63,20 +63,19 @@ class ActorSystemSpec extends Spec with Matchers with BeforeAndAfterAll with Sca
     def `must log to the event stream`(): Unit = pending
 
     def `must have a name`(): Unit =
-      withSystem("name", Props(Empty[String])) { sys =>
+      withSystem("name", Props(Empty[String])) { sys ⇒
         sys.name should ===("name")
       }
 
     def `must report its uptime`(): Unit =
-      withSystem("uptime", Props(Empty[String])) { sys =>
-        val up = sys.uptime
-        up should be < 500L
-        Thread.sleep(300)
-        sys.uptime should be >= (up + 300)
+      withSystem("uptime", Props(Empty[String])) { sys ⇒
+        sys.uptime should be < 1L
+        Thread.sleep(1000)
+        sys.uptime should be >= 1L
       }
 
     def `must have a working thread factory`(): Unit =
-      withSystem("thread", Props(Empty[String])) { sys =>
+      withSystem("thread", Props(Empty[String])) { sys ⇒
         val p = Promise[Int]
         sys.threadFactory.newThread(new Runnable {
           def run(): Unit = p.success(42)
@@ -85,26 +84,26 @@ class ActorSystemSpec extends Spec with Matchers with BeforeAndAfterAll with Sca
       }
 
     def `must be able to run Futures`(): Unit =
-      withSystem("futures", Props(Empty[String])) { sys =>
+      withSystem("futures", Props(Empty[String])) { sys ⇒
         val f = Future(42)(sys.executionContext)
         f.futureValue should ===(42)
-      }
-
-    // this is essential to complete ActorCellSpec, see there
-    def `must correctly treat Watch dead letters`(): Unit =
-      withSystem("deadletters", Props(Empty[String])) { sys =>
-        val client = new DebugRef[Int](sys.path / "debug", true)
-        sys.deadLetters.toImpl.sendSystem(Watch(sys, client))
-        client.receiveAll() should ===(Left(DeathWatchNotification(sys, null)) :: Nil)
       }
 
   }
 
   object `An ActorSystemImpl` extends CommonTests {
     def system[T](name: String, props: Props[T]): ActorSystem[T] = ActorSystem(name, props)
+
+    // this is essential to complete ActorCellSpec, see there
+    def `must correctly treat Watch dead letters`(): Unit =
+      withSystem("deadletters", Props(Empty[String])) { sys ⇒
+        val client = new DebugRef[Int](sys.path / "debug", true)
+        sys.deadLetters.toImpl.sendSystem(Watch(sys, client))
+        client.receiveAll() should ===(Left(DeathWatchNotification(sys, null)) :: Nil)
+      }
   }
 
   object `An ActorSystemAdapter` extends CommonTests {
-    def system[T](name: String, props: Props[T]): ActorSystem[T] = ActorSystem(name, props)
+    def system[T](name: String, props: Props[T]): ActorSystem[T] = ActorSystem.adapter(name, props)
   }
 }
