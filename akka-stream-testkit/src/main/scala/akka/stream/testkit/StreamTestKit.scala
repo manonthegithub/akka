@@ -569,6 +569,20 @@ object TestSubscriber {
     def expectEventPF[T](f: PartialFunction[SubscriberEvent, T]): T =
       probe.expectMsgPF[T](hint = "message matching partial function")(f.asInstanceOf[PartialFunction[Any, T]])
 
+    def receiveMessagesWhile[T](max: Duration = Duration.Undefined, idle: Duration = Duration.Inf, messages: Int = Int.MaxValue)(f: PartialFunction[Any, T]): immutable.Seq[T] =
+      probe.receiveWhile(max, idle, messages){
+        case OnNext(i) => Some(f(i))
+        case _ => None
+      }.flatten
+
+    def receiveMessagesWhileChaining[T](max: Duration = Duration.Undefined, idle: Duration = Duration.Inf, messages: Int = Int.MaxValue)(f: PartialFunction[Any, Any]): Self = {
+      probe.receiveWhile(max, idle, messages) {
+        case OnNext(i) => Some(f(i))
+        case _ => None
+      }
+      self
+    }
+
     /**
      * Receive messages for a given duration or until one does not match a given partial function.
      */
